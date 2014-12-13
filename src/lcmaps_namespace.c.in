@@ -1,0 +1,182 @@
+
+#include <sys/types.h>
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <setjmp.h>
+#include <sched.h>
+
+#include "lcmaps/lcmaps_modules.h"
+#include "lcmaps/lcmaps_cred_data.h"
+#include "lcmaps/lcmaps_arguments.h"
+
+const char *logstr = "namespace";
+#define LCMAPS_NAMESPACE_INIT = "@datadir_resolved@/lcmaps-plugins-namespace/lcmaps-namespace-init"
+
+
+// Forward Dec'ls
+void supervisor(pid_t pid, uid_t uid, gid_t gid);
+void parent(uid_t uid, gid_t gid);
+int fork_ns(int flags);
+
+
+int
+plugin_initialize(int argc, char **argv)
+{
+    return LCMAPS_MOD_SUCCESS;
+}
+
+
+int
+plugin_introspect(int *argc, lcmaps_argument_t **argv)
+{
+    struct lcmaps_argument_t argList[] = {
+        {NULL, NULL, -1, NULL}
+    };
+
+    *argv = argList;
+    *argc = lcmaps_cntArgs(argList);
+
+    return LCMAPS_MOD_SUCCESS;
+}
+
+
+int
+plugin_terminate()
+{
+    return LCMAPS_MOD_SUCCESS;
+}
+
+int
+plugin_verify(int argc, lcmaps_argument_t *argv)
+{
+    return plugin_run(argc, argv);
+}
+
+
+int
+plugin_run(int argc, lcmaps_argument_t *argv)
+{
+    int uid_count = 0, gid_count;
+    uid_t uid;
+    gid_t gid;
+
+    uid_t *uid_array;
+    uid_array = (uid_t *)getCredentialData(UID, &uid_count);
+    if (uid_count != 1)
+    {
+        lcmaps_log(0, "%s: No UID set yet; must map to a UID before running the "
+            "PID namespace module.\n", logstr);
+        goto uid_failure;
+    }
+    uid = uid_array[0];
+
+    gid_t *gid_array = (gid_t *)getCredentialData(PRI_GID, &gid_count);
+    if (gid_count != 1)
+    {
+        lcmaps_log(0, "%s: No primary GID set yet; must map to a GID before running"
+            " the PID namespace module.\n", logstr);
+        goto gid_failure;
+    }
+
+    // The grandparent process creates the namespace; the parent process serves
+    // as the init process.
+    int fork_pid = fork_ns(CLONE_NEWPID);
+    if (fork_pid == -1)
+    {
+        lcmaps_log(0, "%s: Creation of new PID namespace failed: %d %s\n", logstr, errno, strerror(errno));
+        goto pid_ns_failure;
+    }
+    else if (fork_pid == 0)
+    {
+        parent(uid, gid);
+    }
+    else
+    {
+        supervisor(fork_pid, uid, gid);
+        _exit(127);
+    }
+    return LCMAPS_MOD_SUCCESS;
+
+pid_ns_failure:
+gid_failure:
+uid_failure:
+    return LCMAPS_MOD_FAIL;
+}
+
+
+// Exec the init process; kill the child pid on failure.
+static void
+supervisor(pid_t pid, uid_t uid, gid_t gid)
+{
+    char *pid_str[32];
+    if (snprintf(pid_str, 32, "%d", pid) >= 32)
+    {
+        kill(pid, SIGKILL);
+        _exit(127);
+    }
+    char *const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, NULL};
+    execv(LCMAPS_NAMESPACE_INIT, argv);
+    lcmaps_log(0, "%s: Failed to exec the namespace init: %d %s\n", logstr, errno, strerror(errno));
+    kill(pid, SIGKILL);
+    _exit(127);
+}
+
+
+static void
+parent(uid_t uid, gid_t gid)
+{
+    int fork_pid = fork();
+    if (fork_pid == -1)
+    {
+        lcmaps_log(0, "%s: Creation of child process failed: %d %s\n", logstr, errno, strerror(errno));
+        _exit(127);
+    }
+    else if (fork_pid != 0)
+    {
+        supervisor(fork_pid, uid, gid);
+        _exit(127);
+    }
+}
+
+
+typedef struct fork_state_s
+{
+    sigjmp_buf env;
+} fork_state_t;
+
+
+static int
+clone_fn(void *data_ptr)
+{
+    fork_state_t *state = (fork_state_t *)data_ptr;
+    siglongjmp(state->env, 1);
+}
+
+
+static int
+fork_ns(int flags)
+{
+    fork_state_t state;
+    if (sigsetjmp(state.env, 1))
+    {
+        return 0;
+    }
+
+    int stack_size = 32*1024;
+    void *child_stack_ptr = malloc(stack_size);
+    if (child_stack_ptr == 0)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+    child_stack_ptr += stack_size;
+
+    int retval = clone(clone_fn,
+          child_stack_ptr,
+          (SIGCHILD|flags)
+          &state
+         );
+    return retval;
+}
+

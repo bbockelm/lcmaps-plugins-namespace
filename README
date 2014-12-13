@@ -1,0 +1,14 @@
+
+lcmaps-plugins-namespace
+
+This LCMAPS plugin allows glexec to utilize the Linux PID
+namespace feature.  It double-forks the glexec process itself.
+The initial process creates a new PID namespace; the first
+child acts as the 'init' process within the namespace.  The
+second child proceeds as a "typical" glexec.
+
+After the first and second child fork, they will exec the
+lcmaps-namspace-init; this executable continuously reap
+child processes (as does init), forward received signals,
+and exit with the same status as the grandchild process.
+

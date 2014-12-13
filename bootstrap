@@ -1,0 +1,8 @@
+#!/bin/bash
+
+libtoolize --copy --force
+aclocal -I project
+automake -acf
+autoconf
+autoheader
+
