@@ -20,9 +20,41 @@ int main(int argc, char **argv)
 {
     child_pid = -1;
 
-    if (argc != 2)
+    if (argc != 4)
     {
         return 127;
+    }
+
+    // Get the child PID from the parent
+    errno = 0;
+    child_pid = strtol(argv[1], NULL, 10);
+    if (errno)
+    {
+        return 127;
+    }
+
+    errno = 0;
+    uid_t uid = strtol(argv[2], NULL, 10);
+    if (errno)
+    {
+        kill(child_pid, SIGKILL);
+        return 127;
+    }
+    gid_t gid = strtol(argv[3], NULL, 10);
+    if (errno)
+    {
+        kill(child_pid, SIGKILL);
+        return 127;
+    }
+    if (-1 == setgid(gid))
+    {
+        kill(child_pid, SIGKILL);
+        return 1;
+    }
+    if (-1 == setuid(uid))
+    {
+        kill(child_pid, SIGKILL);
+        return 1;
     }
 
     // Install signal handler so we can pass signals to the children.
@@ -41,14 +73,6 @@ int main(int argc, char **argv)
     sigaction(SIGPIPE, &sa, 0);
     sigaction(SIGUSR1, &sa, 0);
     sigaction(SIGUSR2, &sa, 0);
-
-    // Get the child PID from the parent
-    errno = 0;
-    child_pid = strtol(argv[1], NULL, 10);
-    if (errno)
-    {
-        return 127;
-    }
 
     // Reap children, pass along signals, exit correctly.
     int status;
