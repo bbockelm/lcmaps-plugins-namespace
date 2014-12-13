@@ -3,6 +3,7 @@ INSTALL
 .deps
 .libs
 release_dir
+lcmaps-plugins-namespace-*.tar.gz
 lcmaps-namespace-init
 lcmaps_namespace.lo
 lcmaps_namespace.o
