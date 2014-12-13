@@ -1,4 +1,12 @@
+COPYING
+INSTALL
 .deps
+.libs
+release_dir
+lcmaps-namespace-init
+lcmaps_namespace.lo
+lcmaps_namespace.o
+liblcmaps_namespace.la
 Makefile
 Makefile.in
 aclocal.m4
@@ -23,3 +31,4 @@ m4/lt~obsolete.m4
 src/stamp-h1
 src/lcmaps_namespace.c
 src/config.h
+src/config.h.in~

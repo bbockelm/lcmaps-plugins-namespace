@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <setjmp.h>
+#include <string.h>
+#include <errno.h>
 #include <sched.h>
 
 #include "lcmaps/lcmaps_modules.h"
@@ -11,13 +13,13 @@
 #include "lcmaps/lcmaps_arguments.h"
 
 const char *logstr = "namespace";
-#define LCMAPS_NAMESPACE_INIT = "@datadir_resolved@/lcmaps-plugins-namespace/lcmaps-namespace-init"
+#define LCMAPS_NAMESPACE_INIT "@libexecdir_resolved@/lcmaps-plugins-namespace/lcmaps-namespace-init"
 
 
 // Forward Dec'ls
-void supervisor(pid_t pid, uid_t uid, gid_t gid);
-void parent(uid_t uid, gid_t gid);
-int fork_ns(int flags);
+static void supervisor(pid_t pid, uid_t uid, gid_t gid);
+static void parent(uid_t uid, gid_t gid);
+static int fork_ns(int flags);
 
 
 int
@@ -30,7 +32,7 @@ plugin_initialize(int argc, char **argv)
 int
 plugin_introspect(int *argc, lcmaps_argument_t **argv)
 {
-    struct lcmaps_argument_t argList[] = {
+    lcmaps_argument_t argList[] = {
         {NULL, NULL, -1, NULL}
     };
 
@@ -45,12 +47,6 @@ int
 plugin_terminate()
 {
     return LCMAPS_MOD_SUCCESS;
-}
-
-int
-plugin_verify(int argc, lcmaps_argument_t *argv)
-{
-    return plugin_run(argc, argv);
 }
 
 
@@ -78,6 +74,7 @@ plugin_run(int argc, lcmaps_argument_t *argv)
             " the PID namespace module.\n", logstr);
         goto gid_failure;
     }
+    gid = gid_array[0];
 
     // The grandparent process creates the namespace; the parent process serves
     // as the init process.
@@ -105,19 +102,37 @@ uid_failure:
 }
 
 
+int
+plugin_verify(int argc, lcmaps_argument_t *argv)
+{
+    return plugin_run(argc, argv);
+}
+
+
 // Exec the init process; kill the child pid on failure.
 static void
 supervisor(pid_t pid, uid_t uid, gid_t gid)
 {
-    char *pid_str[32];
+    char pid_str[32];
     if (snprintf(pid_str, 32, "%d", pid) >= 32)
     {
-        kill(pid, SIGKILL);
-        _exit(127);
+        goto supervisor_failure;
     }
-    char *const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, NULL};
+    if (-1 == setgid(gid))
+    {
+        lcmaps_log(0, "%s: Failed to switch to GID %d; killing job process: (errno=%d, %s)\n", logstr, gid, errno, strerror(errno));
+        goto supervisor_failure;
+    }
+    if (-1 == setuid(uid))
+    {
+        lcmaps_log(0, "%s: Failed to switch to UID %d; killing job process: (errno=%d, %s)\n", logstr, uid, errno, strerror(errno));
+        goto supervisor_failure;
+    }
+    char * const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, NULL};
     execv(LCMAPS_NAMESPACE_INIT, argv);
-    lcmaps_log(0, "%s: Failed to exec the namespace init: %d %s\n", logstr, errno, strerror(errno));
+    lcmaps_log(0, "%s: Failed to exec the namespace init process %s: %d %s\n", logstr, LCMAPS_NAMESPACE_INIT, errno, strerror(errno));
+
+supervisor_failure:
     kill(pid, SIGKILL);
     _exit(127);
 }
@@ -174,7 +189,7 @@ fork_ns(int flags)
 
     int retval = clone(clone_fn,
           child_stack_ptr,
-          (SIGCHILD|flags)
+          (SIGCHLD|flags),
           &state
          );
     return retval;

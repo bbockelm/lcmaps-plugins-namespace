@@ -44,7 +44,7 @@ int main(int argc, char **argv)
 
     // Get the child PID from the parent
     errno = 0;
-    child_pid = strtol(argv[0], NULL, 10);
+    child_pid = strtol(argv[1], NULL, 10);
     if (errno)
     {
         return 127;
@@ -59,6 +59,8 @@ int main(int argc, char **argv)
         {
             continue;
         }
+        if (WIFEXITED(status)) {_exit(WEXITSTATUS(status));}
+        else {_exit(WTERMSIG(status)+128);}
         _exit(status);
     }
 }

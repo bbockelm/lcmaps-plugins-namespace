@@ -19,8 +19,8 @@ liblcmaps_namespace_la_SOURCES = \
 
 liblcmaps_namespace_la_LDFLAGS = -avoid-version
 
-progdatadir = $(datadir)/lcmaps-plugins-namespace
-progdata_PROGRAMS = lcmaps-namespace-init
+proglibexecdir = $(libexecdir)/lcmaps-plugins-namespace
+proglibexec_PROGRAMS = lcmaps-namespace-init
 
 lcmaps_namespace_init_SOURCES = \
 	src/pid_ns_init.c
@@ -28,9 +28,10 @@ lcmaps_namespace_init_SOURCES = \
 install-data-hook:
 	( \
 	cd $(DESTDIR)$(plugindir); \
-	for mod in mount_under_scratch ; do \
+	for mod in namespace; do \
 	    rm -f lcmaps_$$mod.mod; \
-	    ln -s liblcmaps_$$mod.so.0.0.0 lcmaps_$$mod.mod; \
+            rm -f liblcmaps_$$mod.la; \
+	    ln -s liblcmaps_$$mod.so lcmaps_$$mod.mod; \
 	done \
 	)
 
