@@ -1,4 +1,5 @@
 
+#include <sys/mount.h>
 #include <sys/types.h>
 #include <signal.h>
 #include <stdio.h>
@@ -78,7 +79,7 @@ plugin_run(int argc, lcmaps_argument_t *argv)
 
     // The grandparent process creates the namespace; the parent process serves
     // as the init process.
-    int fork_pid = fork_ns(CLONE_NEWPID);
+    int fork_pid = fork_ns(CLONE_NEWPID|CLONE_NEWNS);
     if (fork_pid == -1)
     {
         lcmaps_log(0, "%s: Creation of new PID namespace failed: %d %s\n", logstr, errno, strerror(errno));
@@ -93,8 +94,16 @@ plugin_run(int argc, lcmaps_argument_t *argv)
         supervisor(fork_pid, uid, gid);
         _exit(127);
     }
+
+    if (-1 == mount("proc", "/proc", "proc", 0, NULL))
+    {
+        lcmaps_log(0, "%s: Remount of /proc failed (errno=%d, %s).\n", logstr, errno, strerror(errno));
+        goto remount_failure;
+    }
+
     return LCMAPS_MOD_SUCCESS;
 
+remount_failure:
 pid_ns_failure:
 gid_failure:
 uid_failure:
@@ -118,17 +127,21 @@ supervisor(pid_t pid, uid_t uid, gid_t gid)
     {
         goto supervisor_failure;
     }
-    if (-1 == setgid(gid))
+    // Note that we do NOT drop permissions until we've successfully exec'd
+    // the other binary.  This is to prevent the payload process from sending
+    // signals to this process *after* dropping privs but *before* exec finishes,
+    // leaving it able to trigger the signal handlers in the glexec process.
+    char uid_str[32];
+    if (snprintf(uid_str, 32, "%d", uid) >= 32)
     {
-        lcmaps_log(0, "%s: Failed to switch to GID %d; killing job process: (errno=%d, %s)\n", logstr, gid, errno, strerror(errno));
         goto supervisor_failure;
     }
-    if (-1 == setuid(uid))
+    char gid_str[32];
+    if (snprintf(gid_str, 32, "%d", gid) >= 32)
     {
-        lcmaps_log(0, "%s: Failed to switch to UID %d; killing job process: (errno=%d, %s)\n", logstr, uid, errno, strerror(errno));
         goto supervisor_failure;
     }
-    char * const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, NULL};
+    char * const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, uid_str, gid_str, NULL};
     execv(LCMAPS_NAMESPACE_INIT, argv);
     lcmaps_log(0, "%s: Failed to exec the namespace init process %s: %d %s\n", logstr, LCMAPS_NAMESPACE_INIT, errno, strerror(errno));
 

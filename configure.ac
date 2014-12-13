@@ -1,5 +1,5 @@
 
-AC_INIT(lcmaps-plugins-namespace,0.1.0,bbockelm@cse.unl.edu)
+AC_INIT(lcmaps-plugins-namespace,0.2.0,bbockelm@cse.unl.edu)
 AC_PREREQ(2.57)
 AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([no-define foreign])

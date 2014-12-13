@@ -1,6 +1,6 @@
 Summary: PID namespaces implementation for glexec as a LCMAPS plugin
 Name: lcmaps-plugins-namespace
-Version: 0.1.0
+Version: 0.2.0
 Release: 1%{?dist}
 License: Public Domain
 Group: System Environment/Libraries
@@ -44,6 +44,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_libexecdir}/%{name}/lcmaps-namespace-init
 
 %changelog
+* Sat Dec 13 2014 Brian Bockelman <bbockelm@cse.unl.edu> - 0.2.0-1
+- Remount /proc and drop privs in the exec'd binary.
+
 * Sat Dec 13 2014 Brian Bockelman <bbockelm@cse.unl.edu> - 0.1.0-1
 - Initial implementation of the PID namespace plugin.
 
