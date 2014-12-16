@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <errno.h>
 
 long int child_pid;
@@ -74,6 +75,13 @@ int main(int argc, char **argv)
     sigaction(SIGUSR1, &sa, 0);
     sigaction(SIGUSR2, &sa, 0);
 
+    // Log to syslog that we have started watching:
+    if (child_pid != 2) // We are the watcher outside the PID namespace.
+    {
+        openlog("lcmaps-namespace", LOG_PID, LOG_DAEMON);
+        syslog(LOG_NOTICE, "glexec.mon[%d#%ld]: Started, target uid %d\n", getpid(), child_pid, uid);
+    }
+
     // Reap children, pass along signals, exit correctly.
     int status;
     while (1)
@@ -83,6 +91,13 @@ int main(int argc, char **argv)
         {
             continue;
         }
+
+        struct rusage usage;
+        if ((child_pid != 2) && (-1 != getrusage(RUSAGE_CHILDREN, &usage)))
+        {
+            syslog(LOG_NOTICE, "glexec.mon[%d#%ld]: Terminated, CPU user %lu system %lu", getpid(), child_pid, usage.ru_utime.tv_sec, usage.ru_stime.tv_sec);
+        }
+
         if (WIFEXITED(status)) {_exit(WEXITSTATUS(status));}
         else {_exit(WTERMSIG(status)+128);}
         _exit(status);
