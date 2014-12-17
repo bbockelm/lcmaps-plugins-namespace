@@ -18,8 +18,8 @@ const char *logstr = "namespace";
 
 
 // Forward Dec'ls
-static void supervisor(pid_t pid, uid_t uid, gid_t gid);
-static void parent(uid_t uid, gid_t gid);
+static void supervisor(pid_t pid, uid_t uid, gid_t gid, int pipefd);
+static void parent(uid_t uid, gid_t gid, int pipefd);
 static int fork_ns(int flags);
 
 
@@ -54,6 +54,7 @@ plugin_terminate()
 int
 plugin_run(int argc, lcmaps_argument_t *argv)
 {
+    int pipes[2]; pipes[0] = -1; pipes[1] = -1;
     int uid_count = 0, gid_count;
     uid_t uid;
     gid_t gid;
@@ -77,6 +78,12 @@ plugin_run(int argc, lcmaps_argument_t *argv)
     }
     gid = gid_array[0];
 
+    if (-1 == pipe(pipes))
+    {
+        lcmaps_log(0, "%s: Creation of communication pipes failed: %d %s\n", logstr, errno, strerror(errno));
+        goto pipe_failure;
+    }
+
     // The grandparent process creates the namespace; the parent process serves
     // as the init process.
     int fork_pid = fork_ns(CLONE_NEWPID|CLONE_NEWNS);
@@ -86,14 +93,17 @@ plugin_run(int argc, lcmaps_argument_t *argv)
         goto pid_ns_failure;
     }
     else if (fork_pid == 0)
-    {
-        parent(uid, gid);
+    {   // Child process
+        close(pipes[1]);
+        parent(uid, gid, pipes[0]);
     }
     else
     {
-        supervisor(fork_pid, uid, gid);
+        close(pipes[0]);
+        supervisor(fork_pid, uid, gid, pipes[1]);
         _exit(127);
     }
+    close(pipes[0]);
 
     if (-1 == mount("proc", "/proc", "proc", 0, NULL))
     {
@@ -105,6 +115,9 @@ plugin_run(int argc, lcmaps_argument_t *argv)
 
 remount_failure:
 pid_ns_failure:
+    if (pipes[0] != -1) {close(pipes[0]);}
+    if (pipes[1] != -1) {close(pipes[1]);}
+pipe_failure:
 gid_failure:
 uid_failure:
     return LCMAPS_MOD_FAIL;
@@ -120,7 +133,7 @@ plugin_verify(int argc, lcmaps_argument_t *argv)
 
 // Exec the init process; kill the child pid on failure.
 static void
-supervisor(pid_t pid, uid_t uid, gid_t gid)
+supervisor(pid_t pid, uid_t uid, gid_t gid, int pipefd)
 {
     char pid_str[32];
     if (snprintf(pid_str, 32, "%d", pid) >= 32)
@@ -141,7 +154,10 @@ supervisor(pid_t pid, uid_t uid, gid_t gid)
     {
         goto supervisor_failure;
     }
-    char * const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, uid_str, gid_str, NULL};
+    char pipe_str[32];
+    if (snprintf(pipe_str, 32, "%d", pipefd) >= 32) {goto supervisor_failure;}
+
+    char * const argv[] = {LCMAPS_NAMESPACE_INIT, pid_str, uid_str, gid_str, pipe_str, NULL};
     execv(LCMAPS_NAMESPACE_INIT, argv);
     lcmaps_log(0, "%s: Failed to exec the namespace init process %s: %d %s\n", logstr, LCMAPS_NAMESPACE_INIT, errno, strerror(errno));
 
@@ -152,7 +168,7 @@ supervisor_failure:
 
 
 static void
-parent(uid_t uid, gid_t gid)
+parent(uid_t uid, gid_t gid, int pipefd)
 {
     int fork_pid = fork();
     if (fork_pid == -1)
@@ -162,7 +178,7 @@ parent(uid_t uid, gid_t gid)
     }
     else if (fork_pid != 0)
     {
-        supervisor(fork_pid, uid, gid);
+        supervisor(fork_pid, uid, gid, pipefd);
         _exit(127);
     }
 }

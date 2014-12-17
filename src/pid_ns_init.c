@@ -1,4 +1,5 @@
 
+#include <sys/signalfd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -6,6 +7,7 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <errno.h>
+#include <poll.h>
 
 long int child_pid;
 
@@ -21,7 +23,7 @@ int main(int argc, char **argv)
 {
     child_pid = -1;
 
-    if (argc != 4)
+    if (argc != 5)
     {
         return 127;
     }
@@ -33,8 +35,6 @@ int main(int argc, char **argv)
     {
         return 127;
     }
-
-    errno = 0;
     uid_t uid = strtol(argv[2], NULL, 10);
     if (errno)
     {
@@ -47,6 +47,28 @@ int main(int argc, char **argv)
         kill(child_pid, SIGKILL);
         return 127;
     }
+    int pipefd = strtol(argv[4], NULL, 10);
+    if (errno)
+    {
+        kill(child_pid, SIGKILL);
+        return 127;
+    }
+    // Setup a FD for handling SIGCHLD
+    int childfd;
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    if (-1 == sigprocmask(SIG_BLOCK, &mask, NULL))
+    {
+        kill(child_pid, SIGKILL);
+        return 127;
+    }
+    if (-1 == (childfd = signalfd(-1, &mask, 0)))
+    {
+        kill(child_pid, SIGKILL);
+        return 127;
+    }
+
     if (-1 == setgid(gid))
     {
         kill(child_pid, SIGKILL);
@@ -82,15 +104,52 @@ int main(int argc, char **argv)
         syslog(LOG_NOTICE, "glexec.mon[%d#%ld]: Started, target uid %d\n", getpid(), child_pid, uid);
     }
 
+    struct pollfd fds[2];
+    fds[0].fd = childfd;
+    fds[0].events = POLLIN;
+    fds[0].revents = 0;
+    unsigned fdcount = 1;
+    if (child_pid == 2) // We want to watch for parent's death.
+    {
+        fdcount++;
+        fds[1].fd = pipefd;
+        fds[1].events = POLLIN;
+        fds[1].revents = 0;
+    }
+
     // Reap children, pass along signals, exit correctly.
     int status;
     while (1)
     {
-        int result = wait(&status);
-        if (((result == -1) && (errno == EINTR)) || (result != child_pid))
+        int result = poll(fds, fdcount, -1);
+        if (result == -1)
         {
-            continue;
+            if (errno == EINTR) {continue;}
+            kill(child_pid, SIGKILL);
+            return 127;
         }
+        if (result > 0) 
+        {
+            if (fds[0].revents)
+            {
+                // Unblock signal, allowing it to be delivered, then re-block.
+                sigprocmask(SIG_UNBLOCK, &mask, NULL);
+                sigprocmask(SIG_BLOCK, &mask, NULL);
+            }
+            else if ((fdcount == 2) && fds[1].revents)
+            {   // Parent died an untimely death.  In normal cases, it should forward
+                // signals and wait for this process to exit.  Likely indicates a batch
+                // system SIGKILL'd it.
+                kill(child_pid, SIGKILL);
+                return 128+SIGKILL;
+            }
+        }
+
+do_wait:
+        result = waitpid(-1, &status, WNOHANG);
+        if ((result == -1) && (errno == EINTR)) {continue;}
+        else if (result == 0) {continue;}
+        else if (result != child_pid) {goto do_wait;}
 
         struct rusage usage;
         if ((child_pid != 2) && (-1 != getrusage(RUSAGE_CHILDREN, &usage)))
