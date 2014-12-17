@@ -1,6 +1,6 @@
 Summary: PID namespaces implementation for glexec as a LCMAPS plugin
 Name: lcmaps-plugins-namespace
-Version: 0.3.0
+Version: 0.4.0
 Release: 1%{?dist}
 License: Public Domain
 Group: System Environment/Libraries
@@ -44,6 +44,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_libexecdir}/%{name}/lcmaps-namespace-init
 
 %changelog
+* Wed Dec 17 2014 Brian Bockelman <bbockelm@cse.unl.edu> - 0.4.0-1
+- Make sure parent knows if grandparent is SIGKILL'd.
+
 * Mon Dec 15 2014 Brian Bockelman <bbockelm@cse.unl.edu> - 0.3.0-1
 - Add support for CPU usage monitoring.
 
