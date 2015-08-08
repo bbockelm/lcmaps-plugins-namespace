@@ -141,6 +141,7 @@ int main(int argc, char **argv)
                 // signals and wait for this process to exit.  Likely indicates a batch
                 // system SIGKILL'd it.
                 kill(child_pid, SIGKILL);
+                syslog(LOG_NOTICE, "glexec.mon[%d#%ld]: Unclean termination of parent process; CPU usage not available.", getpid(), child_pid);
                 return 128+SIGKILL;
             }
         }
