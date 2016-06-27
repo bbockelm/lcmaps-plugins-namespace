@@ -1,4 +1,6 @@
 
+#include "config.h"
+
 #include <sys/signalfd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -8,6 +10,8 @@
 #include <syslog.h>
 #include <errno.h>
 #include <poll.h>
+#include <sys/time.h>
+#include <sys/resource.h>
 
 long int child_pid;
 
@@ -63,7 +67,7 @@ int main(int argc, char **argv)
         kill(child_pid, SIGKILL);
         return 127;
     }
-    if (-1 == (childfd = signalfd(-1, &mask, 0)))
+    if (-1 == (childfd = signalfd(-1, &mask, SFD_CLOEXEC)))
     {
         kill(child_pid, SIGKILL);
         return 127;
@@ -90,7 +94,10 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &sa, 0);
     sigaction(SIGQUIT, &sa, 0);
     sigaction(SIGILL, &sa, 0);
+    sigaction(SIGTRAP, &sa, 0);
     sigaction(SIGABRT, &sa, 0);
+    sigaction(SIGFPE, &sa, 0);
+    sigaction(SIGALRM, &sa, 0);
     sigaction(SIGTERM, &sa, 0);
     sigaction(SIGSEGV, &sa, 0);
     sigaction(SIGPIPE, &sa, 0);
@@ -121,7 +128,7 @@ int main(int argc, char **argv)
     int status;
     while (1)
     {
-        int result = poll(fds, fdcount, -1);
+        int result = poll(fds, fdcount, 1000);
         if (result == -1)
         {
             if (errno == EINTR) {continue;}
@@ -146,11 +153,31 @@ int main(int argc, char **argv)
             }
         }
 
-do_wait:
-        result = waitpid(-1, &status, WNOHANG);
-        if ((result == -1) && (errno == EINTR)) {continue;}
-        else if (result == 0) {continue;}
-        else if (result != child_pid) {goto do_wait;}
+        int wait_more = 0;
+        while (1)
+        {
+            result = waitpid(-1, &status, WNOHANG);
+            if ((result == -1) && (errno == EINTR))
+            {
+                wait_more = 1;
+                break;
+            }
+            else if (result == -1)
+            { // No children?  Programming error?
+                kill(child_pid, SIGKILL);
+                return 127;
+            }
+            else if (result == 0)
+            {
+                wait_more = 1;
+                break;
+            }
+            else if (result == child_pid)
+            {
+                break;
+            }
+        }
+        if (wait_more) {continue;}
 
         struct rusage usage;
         if ((child_pid != 2) && (-1 != getrusage(RUSAGE_CHILDREN, &usage)))
@@ -160,6 +187,7 @@ do_wait:
 
         if (WIFEXITED(status)) {_exit(WEXITSTATUS(status));}
         else {_exit(WTERMSIG(status)+128);}
+        // Should be dead code.
         _exit(status);
     }
 }
